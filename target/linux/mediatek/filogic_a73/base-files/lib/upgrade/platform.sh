@@ -59,22 +59,13 @@ platform_check_image() {
 	[ "$#" -gt 1 ] && return 1
 
 	case "$board" in
+	mediatek,mt7988a-rfb|\
 	bananapi,bpi-r4|\
 	bananapi,bpi-r4-poe|\
-	bananapi,bpi-r4-pro)
-		[ "$(identify_magic_long "$magic")" != "fit" ] && {
-			echo "Invalid image type."
-			return 1
-		}
-
-		return 0
-		;;
-	mediatek,mt7988a-rfb|\
+	bananapi,bpi-r4-pro|\
 	tplink,tl-7dr7230-rev1.0-sp2|\
 	tplink,tl-7dr7299-v1)
-		magic="$(dd if="$1" bs=1 skip=257 count=5 2>/dev/null)"
-
-		[ "$magic" != "ustar" ] && {
+		[ "$(identify_magic_long "$magic")" != "fit" ] && {
 			echo "Invalid image type."
 			return 1
 		}
