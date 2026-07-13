@@ -68,10 +68,10 @@ local methods = {
 			local kernel    = tostring(boardinfo.kernel or "")
 			local features  = {
 				hasIPV6           = fs.access("/proc/net/ipv6_route"),
-				-- disable FLOWOFFLOADING for mt798x
-				hasFLOWOFFLOADING = false,
-				hasFASTCLASSIFIER = module_file_exists(kernel, { "fast-classifier" }) or module_loaded({ "fast_classifier" }),
-				hasSHORTCUTFECM   = module_file_exists(kernel, { "shortcut-fe-cm" }) or module_loaded({ "shortcut_fe_cm" }),
+				-- mt798x primary path is HNAT; other engines are user-selectable (kernel modules may be absent, init script handles gracefully)
+				hasFLOWOFFLOADING = true,
+				hasFASTCLASSIFIER = true,
+				hasSHORTCUTFECM   = true,
 				hasMEDIATEKHNAT   = module_file_exists(kernel, { "mtkhnat", "mediatek_hnat" }) or
 					module_loaded({ "mtkhnat", "mediatek_hnat" }) or
 					fs.stat("/sys/kernel/debug/hnat", "type") == "dir",
@@ -94,15 +94,15 @@ local methods = {
 			elseif (fs.stat("/sys/kernel/debug/hnat", "type") == "dir" or module_loaded({ "mtkhnat", "mediatek_hnat" })) and
 				hnat_hook_enabled()
 			then
-				local wireless_hnat = ""
+				local hnat_note = ""
 
 				if has_mediatek_wireless_dat() and
 					sys.call("grep -q 'WHNAT=1' /etc/wireless/mediatek/*.dat") ~= 0
 				then
-					wireless_hnat = " / Wireless HNAT Disabled"
+					hnat_note = " / HNAT Partially Enabled"
 				end
 
-				fptype = "MediaTek HNAT" .. wireless_hnat
+				fptype = "MediaTek HNAT" .. hnat_note
 			end
 			print(json.stringify({ type = fptype }))
 		end
