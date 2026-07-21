@@ -130,6 +130,10 @@ netis,nx32u)
 	ucidef_set_led_netdev "wifi2G" "wifi2G" "green:wlan-2ghz" "ra0"
 	ucidef_set_led_netdev "wifi5G" "wifi5G" "green:wlan-5ghz" "rax0"
 	;;
+nradio,c8-668gl)
+	ucidef_set_led_netdev "wifi" "WIFI" "blue:wlan" "phy1-ap0" "link"
+	ucidef_set_led_netdev "5g" "5G" "blue:indicator-0" "eth1" "link"
+	;;
 openembed,som7981)
 	ucidef_set_led_netdev "lanact" "LANACT" "amber:lan" "eth1" "rx tx"
 	ucidef_set_led_netdev "lanlink" "LANLINK" "green:lan" "eth1" "link"
