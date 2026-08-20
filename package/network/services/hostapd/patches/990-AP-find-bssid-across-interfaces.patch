@@ -4,7 +4,7 @@ Upstream submission: deploy/0001-hostapd-AP-find-BSSID-*.patch
 
 --- a/src/ap/drv_callbacks.c
 +++ b/src/ap/drv_callbacks.c
-@@ -1967,7 +1967,34 @@
+@@ -1975,7 +1975,34 @@ static void hostapd_rx_from_unknown_sta(
  					const u8 *bssid, const u8 *addr,
  					int wds)
  {
