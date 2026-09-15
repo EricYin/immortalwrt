@@ -1402,10 +1402,15 @@ int rtl837x_dsa_register(struct rtk_gsw *gsw)
 	ds->ageing_time_max = 800000;
 
 	ret = dsa_register_switch(ds);
-	if (ret)
+	if (ret) {
+		dev_err(gsw->dev, "RTL slot stage failed: mdio=%u stage=dsa-register ret=%d\n",
+			gsw->mdio_addr, ret);
 		return ret;
+	}
 
 	gsw->dsa_registered = true;
+	dev_info(gsw->dev, "RTL slot stage done: mdio=%u stage=dsa-register ports=%u\n",
+		 gsw->mdio_addr, ds->num_ports);
 	return 0;
 }
 
@@ -1416,6 +1421,8 @@ void rtl837x_dsa_unregister(struct rtk_gsw *gsw)
 
 	dsa_unregister_switch(&gsw->ds);
 	gsw->dsa_registered = false;
+	dev_info(gsw->dev, "RTL slot stage done: mdio=%u stage=dsa-unregister\n",
+		 gsw->mdio_addr);
 }
 
 void rtl837x_dsa_shutdown(struct rtk_gsw *gsw)
@@ -1425,6 +1432,8 @@ void rtl837x_dsa_shutdown(struct rtk_gsw *gsw)
 
 	dsa_switch_shutdown(&gsw->ds);
 	gsw->dsa_registered = false;
+	dev_info(gsw->dev, "RTL slot stage done: mdio=%u stage=dsa-shutdown\n",
+		 gsw->mdio_addr);
 }
 
 MODULE_DESCRIPTION("RTL837x DSA switch driver");
