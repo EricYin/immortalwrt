@@ -323,6 +323,13 @@ PVID, and ingress-filter state. The other files
 provide per-instance register, internal PHY, and SerDes access. Mount debugfs
 before use if it is not already mounted.
 
+Kernel logs identify each RTL instance by its MDIO address (`mdio=0`,
+`mdio=29`, etc.). A complete lifecycle is emitted as `RTL slot join begin`,
+`probe`, `init`, `dsa-register`, and `RTL slot join done`; removal and shutdown
+emit the matching leave stages. This keeps the two switch slots distinguishable
+when both chips share the same MDIO bus and records the stage and return code
+when initialization fails.
+
 The tagger validates the outer service tag and reports source-port decode
 failures with rate limiting. It does not inspect PPPoE/LCP payloads or keep
 per-switch tracing state. `context` identifies the `rtl837x-8021ad` transport
