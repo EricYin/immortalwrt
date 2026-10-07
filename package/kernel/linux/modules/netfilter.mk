@@ -340,7 +340,7 @@ define KernelPackage/ipt-ipopt
   KCONFIG:=$(KCONFIG_IPT_IPOPT)
   FILES:=$(foreach mod,$(IPT_IPOPT-m),$(LINUX_DIR)/net/$(mod).ko)
   AUTOLOAD:=$(call AutoProbe,$(notdir $(IPT_IPOPT-m)))
-  $(call AddDepends/ipt)
+  $(call AddDepends/ipt,+kmod-nf-conntrack)
 endef
 
 define KernelPackage/ipt-ipopt/description
@@ -1254,6 +1254,22 @@ define KernelPackage/nfnetlink-cttimeout/description
 endef
 
 $(eval $(call KernelPackage,nfnetlink-cttimeout))
+
+
+define KernelPackage/nf-conntrack-bridge
+  SUBMENU:=$(NF_MENU)
+  TITLE:=IPv4/IPv6 bridge connection tracking support
+  DEPENDS:=+kmod-nf-conntrack
+  FILES:=$(LINUX_DIR)/net/bridge/netfilter/nf_conntrack_bridge.ko
+  KCONFIG:=CONFIG_NF_CONNTRACK_BRIDGE
+  AUTOLOAD:=$(call AutoProbe,nf_conntrack_bridge)
+endef
+
+define KernelPackage/nf-conntrack-bridge/description
+ Native bridge connection tracking for nftables flow offload.
+endef
+
+$(eval $(call KernelPackage,nf-conntrack-bridge))
 
 
 define KernelPackage/nf-conntrack-netlink
