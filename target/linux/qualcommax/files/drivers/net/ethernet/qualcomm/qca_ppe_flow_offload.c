@@ -2820,6 +2820,15 @@ static void ppe_flow_reject_hw(struct qca_ppe_priv *priv,
 	event->result_valid = priv->flow_op_result_valid;
 	event->result = event->result_valid ? priv->flow_op_result : 0;
 	event->pending = priv->flow_op_busy;
+	event->expected_index = priv->flow_op_expected_index;
+	event->index_mode = priv->flow_op_index_mode;
+	event->result_rejected = priv->flow_op_result_rejected;
+		event->op_type = priv->flow_op_type;
+		event->request_issued = priv->flow_op_request_issued;
+		event->entry_words = priv->flow_op_nentry;
+		event->host_words = priv->flow_op_nhost;
+		memcpy(event->entry, priv->flow_op_entry, sizeof(event->entry));
+		memcpy(event->host, priv->flow_op_host, sizeof(event->host));
 }
 
 static int ppe_flow_offload_replace(struct ppe_flow_block *fb,

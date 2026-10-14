@@ -3,6 +3,19 @@
 START=19
 USE_PROCD=1
 
+reload_step() {
+	local name="$1" result
+	shift
+	"$@"
+	result=$?
+	if [ "$result" -ne 0 ]; then
+		logger -t router-role -p daemon.err "$name reload failed (exit $result)"
+		return "$result"
+	fi
+	logger -t router-role -p daemon.info "$name reload completed"
+	return 0
+}
+
 start_service() {
 	# Before netifd during boot, or reload when installing on a running router.
 	if [ -n "$(ubus -S list network 2>/dev/null)" ]; then
@@ -13,21 +26,25 @@ start_service() {
 }
 
 reload_service() {
-	local changed
+	local changed failed=0
 	changed="$(/usr/libexec/router-role-auto)" || return 1
 	[ -n "$changed" ] || return 0
+	logger -t router-role -p daemon.info "Reloading services after configuration updates: $changed"
 	case " $changed " in
-		*" network "*) ubus call network reload >/dev/null ;;
+		*" network "*) reload_step netifd ubus call network reload >/dev/null || failed=1 ;;
 	esac
 	case " $changed " in
 		*" dhcp "*|*" network "*)
-			/etc/init.d/odhcpd reload
-			[ ! -x /etc/init.d/dnsmasq ] || /etc/init.d/dnsmasq reload
+			reload_step odhcpd /etc/init.d/odhcpd reload || failed=1
+			if [ -x /etc/init.d/dnsmasq ]; then
+				reload_step dnsmasq /etc/init.d/dnsmasq reload || failed=1
+			fi
 			;;
 	esac
 	case " $changed " in
-		*" firewall "*) /etc/init.d/firewall reload ;;
+		*" firewall "*) reload_step firewall /etc/init.d/firewall reload || failed=1 ;;
 	esac
+	return "$failed"
 }
 
 service_triggers() {
