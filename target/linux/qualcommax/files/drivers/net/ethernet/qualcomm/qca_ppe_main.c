@@ -1377,7 +1377,8 @@ static int qca_ppe_setup(struct dsa_switch *ds)
 	for (i = 1; i < num_ports; i++)
 		ppe_port_vsi_set(priv, i, 0);
 
-	ppe_fdb_flush(priv);
+	if (ppe_fdb_flush(priv))
+		dev_warn(ds->dev, "FDB flush timed out\n");
 
 	regmap_update_bits(priv->regmap, PPE_L2_GLOBAL_CONF,
 			   PPE_L2_LRN_EN | PPE_L2_AGE_EN,
@@ -1566,6 +1567,7 @@ static void qca_ppe_port_bridge_leave(struct dsa_switch *ds, int port,
 	if (!bvsi)
 		return;
 
+	ppe_flow_purge_bridge_port(priv, port);
 	priv->port_vsi[port] = PPE_VSI_INVALID;
 	priv->port_br_dev[port] = NULL;
 	ppe_port_vsi_set(priv, port, 0);
@@ -1751,6 +1753,7 @@ static void qca_ppe_phylink_get_caps(struct dsa_switch *ds, int port,
 				     struct phylink_config *config)
 {
 	struct dsa_port *dp = dsa_to_port(ds, port);
+	phy_interface_t mode;
 
 	if (port != 0) {
 		config->num_possible_pcs = fwnode_phylink_pcs_count(of_fwnode_handle(dp->dn));
@@ -1803,10 +1806,25 @@ static void qca_ppe_phylink_get_caps(struct dsa_switch *ds, int port,
 				   config->supported_interfaces);
 
 	if (port != 0) {
-		config->lpi_capabilities = MAC_100FD | MAC_1000FD;
 		__set_bit(PHY_INTERFACE_MODE_QSGMII, config->lpi_interfaces);
 		__set_bit(PHY_INTERFACE_MODE_PSGMII, config->lpi_interfaces);
 		__set_bit(PHY_INTERFACE_MODE_SGMII, config->lpi_interfaces);
+		if (port >= 5)
+			__set_bit(PHY_INTERFACE_MODE_2500BASEX,
+				  config->lpi_interfaces);
+
+		/* phylink sets the PHY EEE advertisement from lpi_capabilities
+		 * alone, and the XPCS behind USXGMII and 10GBASE-R reports no
+		 * EEE ability, so EEE is offered only on a port whose phy-mode
+		 * has MAC LPI.
+		 */
+		if (of_get_phy_mode(dp->dn, &mode) ||
+		    !test_bit(mode, config->lpi_interfaces))
+			return;
+
+		config->lpi_capabilities = MAC_100FD | MAC_1000FD;
+		if (port >= 5)
+			config->lpi_capabilities |= MAC_2500FD;
 		config->lpi_timer_default = 256;
 		config->eee_enabled_default = true;
 	}
@@ -2223,9 +2241,9 @@ static void qca_ppe_mac_link_up(struct phylink_config *config,
 		break;
 	}
 
-	/* The MAC sends pause only when its buffer-manager port asks for it. */
-	regmap_write(priv->regmap, PPE_BM_FC_MODE(PPE_BM_PHY_START + port - 1),
-		     tx_pause ? PPE_BM_FC_EN : 0);
+	/* Preserve link negotiation; active shapers suppress buffer pause. */
+	priv->port_tx_pause[port] = tx_pause;
+	ppe_pause_update(priv);
 
 	clk_set_rate(priv->port_rx_clk[port], rate);
 	clk_set_rate(priv->port_tx_clk[port], rate);
@@ -2834,6 +2852,11 @@ static void qca_ppe_port_stp_state_set(struct dsa_switch *ds, int port,
 	struct qca_ppe_priv *priv = ds_to_priv(ds);
 	u32 stp_state;
 
+	guard(mutex)(&priv->flow_lock);
+	guard(mutex)(&priv->vlan_lock);
+	if (state != BR_STATE_FORWARDING)
+		ppe_flow_purge_bridge_port(priv, port);
+
 	switch (state) {
 	case BR_STATE_DISABLED:
 		stp_state = PPE_STP_DISABLED;
@@ -2898,7 +2921,11 @@ static int qca_ppe_port_bridge_flags(struct dsa_switch *ds, int port,
 {
 	struct qca_ppe_priv *priv = ds_to_priv(ds);
 
+	guard(mutex)(&priv->flow_lock);
 	guard(mutex)(&priv->vlan_lock);
+
+	if (flags.mask & (BR_ISOLATED | BR_PORT_LOCKED | BR_PORT_MAB))
+		ppe_flow_purge_bridge_port(priv, port);
 
 	priv->port_brflags[port] &= ~flags.mask;
 	priv->port_brflags[port] |= flags.val & flags.mask;
@@ -3661,6 +3688,7 @@ static void qca_ppe_remove(struct platform_device *pdev)
 
 static const struct ppe_data ipq6018_ppe_data = {
 	.type			= PPE_TYPE_IPQ6018,
+	.bridge_flow		= true,
 	.num_ports		= 7,
 	.num_gmacs		= 5,
 	.mru_mtu_ctrl_stride	= 0x10,
@@ -3681,6 +3709,7 @@ static const struct ppe_data ipq6018_ppe_data = {
 
 static const struct ppe_data ipq8074_ppe_data = {
 	.type			= PPE_TYPE_IPQ8074,
+	.bridge_flow		= true,
 	.num_ports		= 8,
 	.num_gmacs		= 6,
 	.mru_mtu_ctrl_stride	= 0x8,

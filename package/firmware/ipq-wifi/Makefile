@@ -2,13 +2,13 @@ include $(TOPDIR)/rules.mk
 include $(INCLUDE_DIR)/version.mk
 
 PKG_NAME:=ipq-wifi
-PKG_RELEASE:=4
+PKG_RELEASE:=6
 
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL=$(PROJECT_GIT)/project/firmware/qca-wireless.git
-PKG_SOURCE_DATE:=2026-10-01
-PKG_SOURCE_VERSION:=6a0f508b9ce3d7b6abf4127f206315ee6c9e1942
-PKG_MIRROR_HASH:=72c12d05177b55a178e1cb73fed5bd823ed9653983ba1ef96f9aecc377a573f9
+PKG_SOURCE_DATE:=2026-10-14
+PKG_SOURCE_VERSION:=8818bb397fb27735ab80612cb88c874a2f153a64
+PKG_MIRROR_HASH:=53b7c287bb740489a133c930fbe67c9d9156e0feea80ed042ade7a550b817f79
 PKG_FLAGS:=nonshared
 
 include $(INCLUDE_DIR)/package.mk
@@ -54,6 +54,7 @@ ALLWIFIBOARDS:= \
 	jdcloud_re-ss-01 \
 	link_nn6000 \
 	linksys_homewrk \
+	linksys_mr2000 \
 	linksys_mr5500 \
 	linksys_mr6350 \
 	linksys_mr7350 \
@@ -112,6 +113,7 @@ ALLWIFIBOARDS:= \
 	ubnt_u7-pro-xgs \
 	ubnt_utr \
 	wallys_dr40x9 \
+	wallys_dr5018s \
 	xiaomi_aiot-ac2350 \
 	xiaomi_ax3600 \
 	xiaomi_ax6000 \
@@ -139,6 +141,7 @@ ALLWIFIBOARDS:= \
 	dptech_ap3000-2c \
 	glinet_gl-be6500 \
 	jdcloud_re-cs-03 \
+	nokia_beacon10 \
 	philips_ly1800 \
 	redmi_ax5 \
 	redmi_ax5-jdcloud \
@@ -146,6 +149,8 @@ ALLWIFIBOARDS:= \
 	verizon_cr1000a \
 	xiaomi_ax1800 \
 	xiaomi_be6500 \
+	xiaomi_be7000 \
+	xiaomi_be7000-pro \
 	zn_m2
 
 ALLWIFIPACKAGES:=$(foreach BOARD,$(ALLWIFIBOARDS),ipq-wifi-$(BOARD))
@@ -173,6 +178,11 @@ define ipq-wifi-install-ath12-one-to
   $(INSTALL_DATA) $(1) $(2)/lib/firmware/ath12k/$(3)/board-2.bin
 endef
 
+define ipq-wifi-install-ath12-qcn9274
+  $(call ipq-wifi-install-ath12-one-to,$(1),$(2),QCN9274/hw2.0)
+  $(call ipq-wifi-install-ath12-one-to,$(1),$(2),QCN9274/hw1.0)
+endef
+
 define ipq-wifi-install-one
   $(if $(filter $(suffix $(1)),.QCA4019 .qca4019),\
     $(call ipq-wifi-install-one-to,$(1),$(2),QCA4019/hw1.0),\
@@ -198,10 +208,12 @@ define ipq-wifi-install-one
     $(call ipq-wifi-install-ath11-one-to,$(1),$(2),QCN6122/hw1.0),\
   $(if $(filter $(suffix $(1)),.QCN9074 .qcn9074),\
     $(call ipq-wifi-install-ath11-one-to,$(1),$(2),QCN9074/hw1.0),\
+  $(if $(filter $(suffix $(1)),.IPQ9574 .ipq9574),\
+    $(call ipq-wifi-install-ath11-one-to,$(1),$(2),IPQ9574/hw1.0),\
   $(if $(filter $(suffix $(1)),.QCN9274 .qcn9274),\
-    $(call ipq-wifi-install-ath12-one-to,$(1),$(2),QCN9274/hw2.0),\
+    $(call ipq-wifi-install-ath12-qcn9274,$(1),$(2)),\
     $(error Unrecognized board-file suffix '$(suffix $(1))' for '$(1)')\
-  )))))))))))))
+  ))))))))))))))
 
 endef
 # Blank line required at end of above define due to foreach context
@@ -278,6 +290,7 @@ $(eval $(call generate-ipq-wifi-package,jdcloud_re-cs-02,JDCloud RE-CS-02))
 $(eval $(call generate-ipq-wifi-package,jdcloud_re-ss-01,JDCloud RE-SS-01))
 $(eval $(call generate-ipq-wifi-package,link_nn6000,Link NN6000))
 $(eval $(call generate-ipq-wifi-package,linksys_homewrk,Linksys HomeWRK))
+$(eval $(call generate-ipq-wifi-package,linksys_mr2000,Linksys MR2000))
 $(eval $(call generate-ipq-wifi-package,linksys_mr5500,Linksys MR5500))
 $(eval $(call generate-ipq-wifi-package,linksys_mr6350,Linksys MR6350))
 $(eval $(call generate-ipq-wifi-package,linksys_mr7350,Linksys MR7350))
@@ -336,6 +349,7 @@ $(eval $(call generate-ipq-wifi-package,tplink_tl-wa1201-v2,TP-Link TL-WA1201 V2
 $(eval $(call generate-ipq-wifi-package,ubnt_u7-pro-xgs,Ubiquiti UniFi 7 Pro XGS))
 $(eval $(call generate-ipq-wifi-package,ubnt_utr,Ubiquiti UniFi Travel Router))
 $(eval $(call generate-ipq-wifi-package,wallys_dr40x9,Wallys DR40X9))
+$(eval $(call generate-ipq-wifi-package,wallys_dr5018s,Wallys DR5018S))
 $(eval $(call generate-ipq-wifi-package,xiaomi_aiot-ac2350,Xiaomi AIoT AC2350))
 $(eval $(call generate-ipq-wifi-package,xiaomi_ax3600,Xiaomi AX3600))
 $(eval $(call generate-ipq-wifi-package,xiaomi_ax6000,Xiaomi AX6000))
@@ -363,6 +377,7 @@ $(eval $(call generate-ipq-wifi-package,cmiot_ax18,CMIOT AX18))
 $(eval $(call generate-ipq-wifi-package,dptech_ap3000-2c,DPtech AP3000-2C))
 $(eval $(call generate-ipq-wifi-package,glinet_gl-be6500,GL.iNet GL-BE6500))
 $(eval $(call generate-ipq-wifi-package,jdcloud_re-cs-03,JDCloud RE-CS-03))
+$(eval $(call generate-ipq-wifi-package,nokia_beacon10,Nokia Beacon 10))
 $(eval $(call generate-ipq-wifi-package,philips_ly1800,Philips LY1800))
 $(eval $(call generate-ipq-wifi-package,redmi_ax5,Redmi AX5))
 $(eval $(call generate-ipq-wifi-package,redmi_ax5-jdcloud,Redmi AX5 JDCloud))
@@ -371,5 +386,8 @@ $(eval $(call generate-ipq-wifi-package,verizon_cr1000a,Verizon CR1000A))
 $(eval $(call generate-ipq-wifi-package,xiaomi_ax1800,Xiaomi AX1800))
 $(eval $(call generate-ipq-wifi-package,xiaomi_be6500,Xiaomi BE6500))
 $(eval $(call generate-ipq-wifi-package,zn_m2,ZN M2))
+
+$(eval $(call generate-ipq-wifi-package,xiaomi_be7000,Xiaomi BE7000))
+$(eval $(call generate-ipq-wifi-package,xiaomi_be7000-pro,Xiaomi BE7000 Pro))
 
 $(foreach PACKAGE,$(ALLWIFIPACKAGES),$(eval $(call BuildPackage,$(PACKAGE))))

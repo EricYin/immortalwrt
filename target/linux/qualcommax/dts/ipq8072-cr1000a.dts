@@ -8,15 +8,6 @@
 #include "ipq8074-common.dtsi"
 #include "ipq8074-hk-cpu.dtsi"
 
-#define RTL93XX_LED_SET_10G         (1 << 0)
-#define RTL93XX_LED_SET_5G          (1 << 1)
-#define RTL93XX_LED_SET_2P5G        (1 << 3)
-#define RTL93XX_LED_SET_1G          (1 << 5)
-#define RTL93XX_LED_SET_100M        (1 << 7)
-#define RTL93XX_LED_SET_10M         (1 << 8)
-#define RTL93XX_LED_SET_LINK        (1 << 9)
-#define RTL93XX_LED_SET_ACT         (1 << 11)
-
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/leds/common.h>
@@ -24,18 +15,6 @@
 / {
 	model = "Verizon CR1000A";
 	compatible = "verizon,cr1000a", "qcom,ipq8074";
-
-	led_set {
-		compatible = "realtek,rtl9300-leds";
-		active-low;
-
-		/* LED0 is orange for 10/100M; LED1 is white for 1G and faster. */
-		led_set0 = <(RTL93XX_LED_SET_10M | RTL93XX_LED_SET_100M |
-			     RTL93XX_LED_SET_LINK | RTL93XX_LED_SET_ACT)
-			    (RTL93XX_LED_SET_1G | RTL93XX_LED_SET_2P5G |
-			     RTL93XX_LED_SET_5G | RTL93XX_LED_SET_10G |
-			     RTL93XX_LED_SET_LINK | RTL93XX_LED_SET_ACT)>;
-	};
 
 	aliases {
 		label-mac-device = &swport5;
@@ -127,6 +106,25 @@
 
 				lan2_phy: ethernet-phy@7 {
 					reg = <7>;
+
+					leds {
+						#address-cells = <1>;
+						#size-cells = <0>;
+
+						led@0 {
+							reg = <0>;
+							color = <LED_COLOR_ID_WHITE>;
+							function = LED_FUNCTION_LAN;
+							linux,default-trigger = "netdev";
+						};
+
+						led@1 {
+							reg = <1>;
+							color = <LED_COLOR_ID_AMBER>;
+							function = LED_FUNCTION_LAN;
+							linux,default-trigger = "netdev";
+						};
+					};
 				};
 			};
 
@@ -137,6 +135,25 @@
 
 				lan3_phy: ethernet-phy@3 {
 					reg = <3>;
+
+					leds {
+						#address-cells = <1>;
+						#size-cells = <0>;
+
+						led@0 {
+							reg = <0>;
+							color = <LED_COLOR_ID_WHITE>;
+							function = LED_FUNCTION_LAN;
+							linux,default-trigger = "netdev";
+						};
+
+						led@1 {
+							reg = <1>;
+							color = <LED_COLOR_ID_AMBER>;
+							function = LED_FUNCTION_LAN;
+							linux,default-trigger = "netdev";
+						};
+					};
 				};
 			};
 
@@ -148,6 +165,25 @@
 				lan1_phy: ethernet-phy@0 {
 					compatible = "ethernet-phy-ieee802.3-c45";
 					reg = <0>;
+
+					leds {
+						#address-cells = <1>;
+						#size-cells = <0>;
+
+						led@0 {
+							reg = <0>;
+							color = <LED_COLOR_ID_WHITE>;
+							function = LED_FUNCTION_LAN;
+							linux,default-trigger = "netdev";
+						};
+
+						led@1 {
+							reg = <1>;
+							color = <LED_COLOR_ID_AMBER>;
+							function = LED_FUNCTION_LAN;
+							linux,default-trigger = "netdev";
+						};
+					};
 				};
 			};
 		};
@@ -190,7 +226,6 @@
 			port@8 {
 				reg = <8>;
 				label = "lan1";
-				led-set = <0>;
 				phy-mode = "usxgmii";
 				managed = "in-band-status";
 				phy-handle = <&lan1_phy>;
@@ -200,7 +235,6 @@
 			port@14 {
 				reg = <20>;
 				label = "lan2";
-				led-set = <0>;
 				phy-mode = "2500base-x";
 				phy-handle = <&lan2_phy>;
 				pcs-handle = <&rtl9303_sds5 0>;
@@ -209,7 +243,6 @@
 			port@18 {
 				reg = <24>;
 				label = "lan3";
-				led-set = <0>;
 				phy-mode = "2500base-x";
 				phy-handle = <&lan3_phy>;
 				pcs-handle = <&rtl9303_sds6 0>;
@@ -257,6 +290,25 @@
 		compatible = "ethernet-phy-ieee802.3-c45";
 		reg = <0x08>;
 		// reset-gpios = <&tlmm 63 GPIO_ACTIVE_LOW>;
+
+		leds {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			led@0 {
+				reg = <0>;
+				color = <LED_COLOR_ID_WHITE>;
+				function = LED_FUNCTION_WAN;
+				linux,default-trigger = "netdev";
+			};
+
+			led@1 {
+				reg = <1>;
+				color = <LED_COLOR_ID_AMBER>;
+				function = LED_FUNCTION_WAN;
+				linux,default-trigger = "netdev";
+			};
+		};
 	};
 
 	mxl3711: ethernet-phy@f {

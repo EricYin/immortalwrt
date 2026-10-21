@@ -17,8 +17,8 @@
 	aliases {
 		led-boot = &led_status_orange;
 		led-failsafe = &led_status_orange;
-		led-running = &led_status_orange;
-		led-upgrade = &led_status_orange;
+		led-running = &led_status_white;
+		led-upgrade = &led_status_white;
 	};
 
 	chosen {
@@ -55,14 +55,12 @@
 			color = <LED_COLOR_ID_ORANGE>;
 			function = LED_FUNCTION_STATUS;
 			gpios = <&tlmm 32 GPIO_ACTIVE_HIGH>;
-			default-state = "on";
 		};
 
 		led_status_white: status-white {
 			color = <LED_COLOR_ID_WHITE>;
 			function = LED_FUNCTION_STATUS;
 			gpios = <&tlmm 30 GPIO_ACTIVE_HIGH>;
-			default-state = "off";
 		};
 	};
 };
@@ -104,7 +102,7 @@
 
 		port@4 {
 			label = "wan";
-			nvmem-cells = <&base_macaddr 0>;
+			nvmem-cells = <&macaddr_art_0 0>;
 			nvmem-cell-names = "mac-address";
 		};
 	};
@@ -121,7 +119,7 @@
 };
 
 &ppe_qca8386 {
-	nvmem-cells = <&base_macaddr 1>;
+	nvmem-cells = <&macaddr_art_0 1>;
 	nvmem-cell-names = "mac-address";
 
 	/* Match the switch CPU PAUSE so DS uplink cannot overrun it. */
@@ -159,9 +157,21 @@
 					#address-cells = <1>;
 					#size-cells = <1>;
 
-					base_macaddr: mac-address@0 {
+					macaddr_art_0: mac-address@0 {
 						compatible = "mac-base";
 						reg = <0x0 0x6>;
+						#nvmem-cell-cells = <1>;
+					};
+
+					macaddr_art_6: mac-address@6 {
+						compatible = "mac-base";
+						reg = <0x6 0x6>;
+						#nvmem-cell-cells = <1>;
+					};
+
+					macaddr_art_c: mac-address@c {
+						compatible = "mac-base";
+						reg = <0xc 0x6>;
 						#nvmem-cell-cells = <1>;
 					};
 				};
@@ -190,13 +200,13 @@
 &wifi1 {
 	qcom,board-id = <2>;
 
-	nvmem-cells = <&base_macaddr 4>;
+	nvmem-cells = <&macaddr_art_c 0>;
 	nvmem-cell-names = "mac-address";
 };
 
 &wifi0 {
 	qcom,board-id = <18>;
 
-	nvmem-cells = <&base_macaddr 3>;
+	nvmem-cells = <&macaddr_art_6 0>;
 	nvmem-cell-names = "mac-address";
 };
