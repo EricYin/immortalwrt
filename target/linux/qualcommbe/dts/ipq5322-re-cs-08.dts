@@ -85,10 +85,6 @@
 	pinctrl-names = "default";
 };
 
-&q6_region {
-	reg = <0x0 0x4a900000 0x0 0x800000>;
-};
-
 &ref_48mhz_clk {
 	clock-div = <1>;
 	clock-mult = <2>;
@@ -113,14 +109,20 @@
 
 		port@2 {
 			label = "lan1";
+			nvmem-cells = <&lan_macaddr 0>;
+			nvmem-cell-names = "mac-address";
 		};
 
 		port@3 {
 			label = "lan2";
+			nvmem-cells = <&lan_macaddr 0>;
+			nvmem-cell-names = "mac-address";
 		};
 
 		port@4 {
 			label = "lan3";
+			nvmem-cells = <&lan_macaddr 0>;
+			nvmem-cell-names = "mac-address";
 		};
 	};
 };
@@ -175,11 +177,6 @@
 
 &pcie1_phy {
 	status = "okay";
-};
-
-&ppe_qca8386 {
-	nvmem-cells = <&lan_macaddr 0>;
-	nvmem-cell-names = "mac-address";
 };
 
 &sdhc {
@@ -266,4 +263,12 @@
 		drive-strength = <8>;
 		bias-pull-down;
 	};
+};
+
+&q6_region {
+	reg = <0x0 0x4a900000 0x0 0x800000>;
+};
+
+&tzapp {
+	reg = <0x0 0x4b100000 0x0 0x800000>;
 };
