@@ -1,9 +1,31 @@
-From: ViKing <viking.yfy@qq.com>
-Date: Tue, 27 Oct 2026 09:40:00 +0800
+From: Jeff Johnson <jeff.johnson@oss.qualcomm.com>
+Date: Wed, 28 Oct 2026 13:34:14 +0800
 Subject: [PATCH] wifi: ath12k: validate WMI capability event and TLV bounds
 
-Consolidate consecutive changes within this functional responsibility.
-Retain the final implementation and its error handling directly.
+Currently, in ath12k_wmi_mac_phy_caps_parse(), kzalloc() sizes the
+mac_phy_caps buffer as tot_phy_id * len, where len is clamped to
+min(firmware_len, sizeof(struct ath12k_wmi_mac_phy_caps_params)). The
+subsequent memcpy() destination advances by sizeof(full struct) per slot
+via C pointer arithmetic, not by the clamped len. When firmware sends short
+TLVs, the second and later slots are written past the end of the
+allocation.
+
+Currently, in ath12k_wmi_op_rx(), the firmware buffer is read without first
+verifying that the buffer has enough data to hold a header. This could
+result in a buffer overread.
+
+There is no policy entry for WMI_TAG_PDEV_CSA_SWITCH_COUNT_STATUS_EVENT, so
+the parse infrastructure does not enforce a minimum length for the event
+struct. Additionally, the num_vdevs field is taken directly from firmware
+and used as a loop bound over the vdev_ids array without checking that it
+fits within the TLV payload. Either condition can cause an out-of-bounds
+read.
+
+The outer skb->len guard only confirms the SKB is large enough to hold the
+full fixed_param struct, but the TLV's own WMI_TLV_LEN field is never
+checked. Firmware advertising a TLV length shorter than
+sizeof(*fixed_param) causes reads of pdev_id and event_count beyond the
+declared TLV payload.
 
 Merged from:
   116-wifi-ath12k-fix-stride-mismatch-in-mac_phy_caps_parse.patch
@@ -23,6 +45,7 @@ Link: https://patch.msgid.link/20260724-ath12k_wmi_process_csa_switch_count_even
 Original-commit: 8e415b8068480d51a057197ded974e2637e8c42b
 Link: https://patch.msgid.link/20260726-ath12k_wmi_process_tpc_stats-len-check-v1-1-c4ba2f84d9c6@oss.qualcomm.com
 
+Signed-off-by: Jeff Johnson <jeff.johnson@oss.qualcomm.com>
 Signed-off-by: ViKing <viking.yfy@qq.com>
 
 --- a/drivers/net/wireless/ath/ath12k/wmi.c
@@ -70,7 +93,7 @@ Signed-off-by: ViKing <viking.yfy@qq.com>
  	memcpy(svc_rdy_ext->mac_phy_caps + svc_rdy_ext->n_mac_phy_caps, ptr, len);
  	svc_rdy_ext->n_mac_phy_caps++;
  	return 0;
-@@ -9041,12 +9052,19 @@
+@@ -9042,12 +9053,19 @@
  					  const u32 *vdev_ids)
  {
  	u32 current_switch_count = le32_to_cpu(ev->current_switch_count);
@@ -90,7 +113,7 @@ Signed-off-by: ViKing <viking.yfy@qq.com>
  	rcu_read_lock();
  	for (i = 0; i < num_vdevs; i++) {
  		arvif = ath12k_mac_get_arvif_by_vdev_id(ab, vdev_ids[i]);
-@@ -9936,6 +9954,7 @@
+@@ -9937,6 +9955,7 @@
  	void *ptr = skb->data;
  	struct ath12k *ar;
  	u16 tlv_tag;
@@ -98,7 +121,7 @@ Signed-off-by: ViKing <viking.yfy@qq.com>
  	u32 event_count;
  	int ret;
  
-@@ -9951,6 +9970,7 @@
+@@ -9952,6 +9971,7 @@
  
  	tlv = (struct wmi_tlv *)ptr;
  	tlv_tag = le32_get_bits(tlv->header, WMI_TLV_TAG);
@@ -106,7 +129,7 @@ Signed-off-by: ViKing <viking.yfy@qq.com>
  	ptr += sizeof(*tlv);
  
  	if (tlv_tag != WMI_TAG_HALPHY_CTRL_PATH_EVENT_FIXED_PARAM) {
-@@ -9958,6 +9978,12 @@
+@@ -9959,6 +9979,12 @@
  		return;
  	}
  
@@ -119,7 +142,7 @@ Signed-off-by: ViKing <viking.yfy@qq.com>
  	fixed_param = (struct ath12k_wmi_pdev_tpc_stats_event_fixed_params *)ptr;
  	rcu_read_lock();
  	ar = ath12k_mac_get_ar_by_pdev_id(ab, le32_to_cpu(fixed_param->pdev_id) + 1);
-@@ -10264,12 +10290,12 @@
+@@ -10265,12 +10291,12 @@
  	struct wmi_cmd_hdr *cmd_hdr;
  	enum wmi_tlv_event_id id;
  
