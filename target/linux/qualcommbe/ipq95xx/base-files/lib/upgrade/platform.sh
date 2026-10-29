@@ -23,8 +23,8 @@ platform_do_upgrade() {
 	case "$(board_name)" in
 	8devices,kiwi-dvk|\
 	nokia,beacon10)
-		CI_KERNPART="0:HLOS"
-		CI_ROOTPART="rootfs"
+		CI_KERNPART="HLOS_5"
+		CI_ROOTPART="rootfs_5"
 		emmc_do_upgrade "$1"
 		;;
 	askey,sbe1v1k)
