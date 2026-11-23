@@ -119,19 +119,38 @@ MODULE_PARM_DESC(msg_trace, "dump every control message sent to the firmware");
  * connection-statistics sweep.
  */
 static int nss_msg_xact(struct nss_core *core, void *msg, size_t len,
-			size_t room, bool quiet)
+				size_t room, bool quiet, bool *pending)
 {
 	struct nss_cmn_msg *ncm = msg;
 	struct nss_h2n_ring *ring = &core->h2n[NSS_H2N_RING_COMMAND];
 	struct nss_if_mem_map *map = core->if_map;
 	unsigned long timeout = msecs_to_jiffies(NSS_MSG_TIMEOUT_MS);
 	struct h2n_descriptor *desc;
+	struct nss_dynamic_interface_msg *dynamic = msg;
+	bool dynamic_node;
 	u32 next;
 	int ret;
 
+	if (pending)
+		*pending = false;
 	if (len < sizeof(*ncm) || len > NSS_MSG_BUF_SIZE ||
 	    room < len || room > NSS_MSG_BUF_SIZE)
 		return -EMSGSIZE;
+
+	/* The dynamic-node service itself is a special interface. Its payload
+	 * must name a dynamic node, never another special or physical node.
+	 * Check all consumers here, including radio and diagnostic callers.
+	 */
+	dynamic_node = ncm->interface == NSS_INTERFACE_DYNAMIC &&
+		(ncm->type == NSS_DYNAMIC_INTERFACE_ALLOC_NODE ||
+		 ncm->type == NSS_DYNAMIC_INTERFACE_DEALLOC_NODE);
+	if (dynamic_node) {
+		if (len < sizeof(*dynamic))
+			return -EMSGSIZE;
+		if (ncm->type == NSS_DYNAMIC_INTERFACE_DEALLOC_NODE &&
+		    !nss_dynamic_interface_valid(dynamic->msg.dealloc_node.if_num))
+			return -ERANGE;
+	}
 
 	guard(mutex)(&core->msg.lock);
 
@@ -189,6 +208,8 @@ static int nss_msg_xact(struct nss_core *core, void *msg, size_t len,
 		WRITE_ONCE(map->h2n_hlos_index[NSS_H2N_RING_COMMAND], next);
 	}
 
+	if (pending)
+		*pending = true;
 	nss_doorbell(core, NSS_H2N_INTR_DATA_CMD);
 
 	if (!wait_for_completion_timeout(&core->msg.done, timeout)) {
@@ -202,9 +223,13 @@ static int nss_msg_xact(struct nss_core *core, void *msg, size_t len,
 	switch (ncm->response) {
 	case NSS_CMN_RESPONSE_ACK:
 	case NSS_CMN_RESPONSE_NOTIFY:	/* answered in the same buffer */
+		if (pending)
+			*pending = false;
 		ret = 0;
 		break;
 	case NSS_CMN_RESPONSE_EMSG:
+		if (pending)
+			*pending = false;
 		if (!quiet)
 			dev_err(core->dev, "interface %u type %u refused: %u\n",
 				ncm->interface, ncm->type, ncm->error);
@@ -219,23 +244,40 @@ static int nss_msg_xact(struct nss_core *core, void *msg, size_t len,
 
 	memcpy(msg, core->msg.buf, room);
 
+	/* A syntactically successful ACK is not permission to address a static
+	 * firmware service as a VAP, radio, mesh, redirect or PPPoE node.
+	 * Invalid allocation replies must not reach a later deallocation.
+	 */
+	if (!ret && dynamic_node &&
+	    !nss_dynamic_interface_valid(dynamic->msg.alloc_node.if_num))
+		return -ERANGE;
+
 	return ret;
 }
 
 int nss_msg_transact(struct nss_core *core, void *msg, size_t len, size_t room)
 {
-	return nss_msg_xact(core, msg, len, room, false);
+	return nss_msg_xact(core, msg, len, room, false, NULL);
 }
 
 int nss_msg_send(struct nss_core *core, void *msg, size_t len)
 {
-	return nss_msg_xact(core, msg, len, len, false);
+	return nss_msg_xact(core, msg, len, len, false, NULL);
 }
 
 /* For a sender that judges the refusal itself. */
 int nss_msg_send_quiet(struct nss_core *core, void *msg, size_t len)
 {
-	return nss_msg_xact(core, msg, len, len, true);
+	return nss_msg_xact(core, msg, len, len, true, NULL);
+}
+
+/* A published command without a definitive reply can still change firmware
+ * state. Flow ownership must survive that result until retirement or halt.
+ */
+int nss_msg_send_tracked(struct nss_core *core, void *msg, size_t len,
+			 bool *pending)
+{
+	return nss_msg_xact(core, msg, len, len, true, pending);
 }
 
 /* Whether the firmware has a node of this kind to give, and what it calls it.
