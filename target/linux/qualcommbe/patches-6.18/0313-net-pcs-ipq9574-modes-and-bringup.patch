@@ -1,5 +1,5 @@
 From: Lei Wei <quic_leiwei@quicinc.com>
-Date: Thu, 05 Nov 2026 15:55:19 +0800
+Date: Sun, 15 Nov 2026 14:43:15 +0800
 Subject: [PATCH] net: pcs: ipq9574: implement link modes and UNIPHY bring-up
 
 The 'UNIPHY' PCS block in the IPQ9574 SoC includes PCS and SerDes
@@ -66,9 +66,11 @@ Align the USXGMII configuration sequence with the SSDK:
 Reuse the qcom-ipq9574 PCS driver for IPQ5332 with an explicit MII clock
 rate request during link-up.
 
-Use the SFP state machine to gate forced 1000BASE-X and 2500BASE-X links
-without in-band negotiation. Select the SGMII+ MAC personality explicitly
-without inheriting bootloader or previous interface settings.
+Use the SFP state machine to gate forced 1000BASE-X links without
+in-band negotiation. Read the PCS link bit for 2500BASE-X even when
+autonegotiation is disabled: copper modules can leave LOS deasserted
+while their copper link is down. Select the SGMII+ MAC personality
+explicitly without inheriting bootloader or previous interface settings.
 
 Select the NSSCC USXGMII MII clock source before releasing XPCS reset
 so initial negotiation does not depend on a previous bootloader.
@@ -120,8 +122,6 @@ Signed-off-by: Til Kaiser <mail@tk154.de>
 Signed-off-by: ViKing <viking.yfy@qq.com>
 ---
 
-diff --git a/Documentation/devicetree/bindings/net/pcs/qcom,ipq9574-pcs.yaml b/Documentation/devicetree/bindings/net/pcs/qcom,ipq9574-pcs.yaml
-new file mode 100644
 --- /dev/null
 +++ b/Documentation/devicetree/bindings/net/pcs/qcom,ipq9574-pcs.yaml
 @@ -0,0 +1,197 @@
@@ -322,10 +322,9 @@ new file mode 100644
 +                          "tx";
 +        };
 +    };
-diff --git a/drivers/net/pcs/Kconfig b/drivers/net/pcs/Kconfig
 --- a/drivers/net/pcs/Kconfig
 +++ b/drivers/net/pcs/Kconfig
-@@ -45,6 +45,15 @@
+@@ -45,6 +45,15 @@ config PCS_MTK_USXGMII
  	  1000Base-X, 2500Base-X and Cisco SGMII are supported on the same
  	  differential pairs via an embedded LynxI PCS.
  
@@ -341,19 +340,16 @@ diff --git a/drivers/net/pcs/Kconfig b/drivers/net/pcs/Kconfig
  config PCS_RZN1_MIIC
  	tristate "Renesas RZ/N1, RZ/N2H, RZ/T2H MII converter"
  	depends on OF
-diff --git a/drivers/net/pcs/Makefile b/drivers/net/pcs/Makefile
 --- a/drivers/net/pcs/Makefile
 +++ b/drivers/net/pcs/Makefile
-@@ -10,3 +10,4 @@
+@@ -10,3 +10,4 @@ obj-$(CONFIG_PCS_LYNX)		+= pcs-lynx.o
  obj-$(CONFIG_PCS_MTK_LYNXI)	+= pcs-mtk-lynxi.o
  obj-$(CONFIG_PCS_MTK_USXGMII)	+= pcs-mtk-usxgmii.o
  obj-$(CONFIG_PCS_RZN1_MIIC)	+= pcs-rzn1-miic.o
 +obj-$(CONFIG_PCS_QCOM_IPQ9574)	+= pcs-qcom-ipq9574.o
-diff --git a/drivers/net/pcs/pcs-qcom-ipq9574.c b/drivers/net/pcs/pcs-qcom-ipq9574.c
-new file mode 100644
 --- /dev/null
 +++ b/drivers/net/pcs/pcs-qcom-ipq9574.c
-@@ -0,0 +1,1392 @@
+@@ -0,0 +1,1379 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
@@ -574,23 +570,10 @@ new file mode 100644
 +}
 +
 +static void ipq_pcs_get_state_2500basex(struct ipq_pcs *qpcs,
-+					unsigned int neg_mode,
 +					struct phylink_link_state *state)
 +{
 +	unsigned int val;
 +	int ret;
-+
-+	/* A copper SFP without PHY I2C access cannot provide 2500BASE-X
-+	 * in-band status. In that mode the SFP state machine already gates
-+	 * phylink through its LOS-driven link_up and link_down callbacks.
-+	 */
-+	if (neg_mode == PHYLINK_PCS_NEG_INBAND_DISABLED) {
-+		state->link = true;
-+		state->speed = SPEED_2500;
-+		state->duplex = DUPLEX_FULL;
-+		state->pause |= MLO_PAUSE_TXRX_MASK;
-+		return;
-+	}
 +
 +	ret = regmap_read(qpcs->regmap, PCS_MII_STS(0), &val);
 +	if (ret) {
@@ -1243,7 +1226,7 @@ new file mode 100644
 +		ipq_pcs_get_state_sgmii(qpcs, index, state);
 +		break;
 +	case PHY_INTERFACE_MODE_2500BASEX:
-+		ipq_pcs_get_state_2500basex(qpcs, neg_mode, state);
++		ipq_pcs_get_state_2500basex(qpcs, state);
 +		break;
 +	case PHY_INTERFACE_MODE_USXGMII:
 +	case PHY_INTERFACE_MODE_10G_QXGMII:
@@ -1746,8 +1729,6 @@ new file mode 100644
 +MODULE_LICENSE("GPL");
 +MODULE_DESCRIPTION("Qualcomm IPQ9574 PCS driver");
 +MODULE_AUTHOR("Lei Wei <quic_leiwei@quicinc.com>");
-diff --git a/include/dt-bindings/net/qcom,ipq9574-pcs.h b/include/dt-bindings/net/qcom,ipq9574-pcs.h
-new file mode 100644
 --- /dev/null
 +++ b/include/dt-bindings/net/qcom,ipq9574-pcs.h
 @@ -0,0 +1,15 @@
@@ -1766,8 +1747,6 @@ new file mode 100644
 +#define PCS_TX_CLK		1
 +
 +#endif /* _DT_BINDINGS_PCS_QCOM_IPQ9574_H */
-diff --git a/include/linux/pcs/pcs-qcom-ipq9574.h b/include/linux/pcs/pcs-qcom-ipq9574.h
-new file mode 100644
 --- /dev/null
 +++ b/include/linux/pcs/pcs-qcom-ipq9574.h
 @@ -0,0 +1,15 @@

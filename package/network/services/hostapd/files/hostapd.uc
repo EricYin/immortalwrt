@@ -1,5 +1,6 @@
 let libubus = require("ubus");
 import * as uloop from "uloop";
+import * as nl80211 from "nl80211";
 import { open, readfile, access } from "fs";
 import { wdev_remove, is_equal, vlist_new, phy_is_fullmac, phy_open, wdev_set_radio_mask, wdev_set_up, macaddr_keep, macaddr_sync, macaddr_sync_defer, macaddr_sync_entry, macaddr_release_defer, mld_prev_match } from "common";
 
@@ -19,6 +20,7 @@ hostapd.data.pending_config = {};
 hostapd.data.apsta_freq = {};
 hostapd.data.apsta_stopped = {};
 hostapd.data.link_reload = {};
+hostapd.data.link_remove_wait = [];
 
 hostapd.data.file_fields = {
 	vlan_file: true,
@@ -166,14 +168,25 @@ function iface_freq_info(iface, config, params)
 
 	/*
 	 * 6 GHz has no HT Operation IE, so the secondary channel offset cannot
-	 * be derived the usual way. For wide channels pass a null offset so the
+	 * be derived the usual way. Operating class 132 is 40 MHz despite its
+	 * USE_HT width value. For wide channels pass a null offset so the
 	 * C helper auto-derives it and computes the segment centre frequency; a
 	 * 0 offset would make it skip the centre calculation.
 	 */
-	if (freq > 5925 && width > 0 && sec_offset == 0)
+	if (freq > 5925 && sec_offset == 0 &&
+	    (width > 0 || index(config.radio.data, "op_class=132") >= 0))
 		sec_offset = null;
 
-	return hostapd.freq_info(freq, sec_offset, width);
+	let info = hostapd.freq_info(freq, sec_offset, width);
+	// 20 MHz has no secondary channel. Clear centres retained from the
+	// previous wide channel instead of leaving them unchanged in iface.start().
+	if (info && width == 0 && sec_offset == 0) {
+		info.center_seg0_idx = 0;
+		info.center_seg1_idx = 0;
+		info.center_freq1 = freq;
+		info.center_freq2 = 0;
+	}
+	return info;
 }
 
 function iface_add(phy, config, phy_status)
@@ -362,6 +375,7 @@ function __iface_pending_next(pending, state, ret, data)
 			});
 			if (err) {
 				hostapd.printf(`Failed to create ${bss.ifname} on phy ${phy}: ${err}`);
+				hostapd.data.setup_errors[phy] = 'AP_INTERFACE_CREATE_FAILED';
 				iface_supplicant_start(phydev);
 				return null;
 			}
@@ -395,8 +409,10 @@ function __iface_pending_next(pending, state, ret, data)
 		if (iface_pending_phy_wait(pending))
 			return "wpas_stopped";
 
-		if (!iface_add(phy, config))
+		if (!iface_add(phy, config)) {
 			hostapd.printf(`hostapd.add_iface failed for phy ${phy} ifname=${bss.ifname}`);
+			hostapd.data.setup_errors[phy] = 'AP_INTERFACE_START_FAILED';
+		}
 		pending.call("wpa_supplicant", "phy_set_state", {
 			phy: phydev.phy,
 			radio: phydev.radio ?? -1,
@@ -424,6 +440,7 @@ function iface_pending_next(ret, data)
 			}
 		} catch(e) {
 			hostapd.printf(`Exception: ${e}\n${e.stacktrace[0].context}`);
+			hostapd.data.setup_errors[cfg.phy] = 'AP_SETUP_FAILED';
 			iface_supplicant_start(cfg.phydev);
 			__iface_pending_next(cfg, "done");
 			return;
@@ -506,6 +523,8 @@ function iface_link_reload_cancel(name)
 function iface_restart(phydev, config, old_config)
 {
 	let phy = phydev.name;
+	hostapd.data.setup_errors ??= {};
+	delete hostapd.data.setup_errors[phy];
 	let pending = hostapd.data.pending_config[phy];
 
 	csa_timer_cancel(phy);
@@ -530,7 +549,7 @@ function iface_restart(phydev, config, old_config)
 		hostapd.printf(`No bss for phy ${phy}`);
 		if (pending)
 			iface_supplicant_start(phydev);
-		return;
+		return false;
 	}
 
 	iface_macaddr_prune(phydev.name, config);
@@ -547,11 +566,12 @@ function iface_restart(phydev, config, old_config)
 				delete cur.bssid;
 		if (pending)
 			iface_supplicant_start(phydev);
-		return;
+		return false;
 	}
 	iface_macaddr_sync(phydev, config);
 
 	iface_pending_init(phydev, config);
+	return true;
 }
 
 function array_to_obj(arr, key, start)
@@ -1762,6 +1782,68 @@ function iface_link_reload_expired(phy, name)
 	return true;
 }
 
+const LINK_REMOVE_REPLY_MARGIN_MS = 1000;
+
+function mld_link_remove_times(times)
+{
+	return {
+		removal_ms: times?.removal_ms ?? 0,
+		expiry_ms: times?.expiry_ms ?? 0,
+	};
+}
+
+function time_ms()
+{
+	let t = clock(true);
+
+	return t[0] * 1000 + t[1] / 1000000;
+}
+
+function mld_link_remove_reply(wait, bss)
+{
+	let times = mld_link_remove_times(bss.link_remove_times?.());
+
+	hostapd.data.link_remove_wait = filter(hostapd.data.link_remove_wait,
+					       (w) => w != wait);
+	wait.timer.cancel();
+
+	// The caller counts the expiry from its request and the stop from the reply
+	if (times.expiry_ms)
+		times.expiry_ms += time_ms() - wait.start_ms;
+	wait.req.reply(times);
+}
+
+function mld_link_remove_defer(req, phy, name, bss, removal_ms)
+{
+	let wait = { req, phy, name, bss, start_ms: time_ms() };
+
+	wait.timer = uloop.timer(removal_ms + LINK_REMOVE_REPLY_MARGIN_MS,
+				 () => mld_link_remove_reply(wait, wait.bss));
+	push(hostapd.data.link_remove_wait, wait);
+	req.defer();
+}
+
+function mld_link_remove_answer(phy, name, bss)
+{
+	let waits = filter(hostapd.data.link_remove_wait,
+			   (w) => w.phy == phy && w.name == name);
+
+	for (let wait in waits)
+		mld_link_remove_reply(wait, bss);
+}
+
+function iface_link_reload_timed(phy, name, bss)
+{
+	let reload = hostapd.data.link_reload[phy];
+	if (!reload?.links[name])
+		return;
+
+	let wait_ms = mld_link_remove_times(bss.link_remove_times?.()).removal_ms +
+		      LINK_RELOAD_MARGIN_MS;
+	if (wait_ms > reload.timer.remaining())
+		reload.timer.set(wait_ms);
+}
+
 function iface_set_config(name, config)
 {
 	let old_config = hostapd.data.config[name];
@@ -1830,6 +1912,25 @@ function config_add_bss(config, name)
 	push(config.bss, bss);
 
 	return bss;
+}
+
+function iface_acs_radio_ranges(phy, radio)
+{
+	if (radio == null)
+		return;
+
+	let phydev = phy_open(phy, radio);
+	if (!phydev)
+		return;
+
+	let wiphy = nl80211.request(nl80211.const.NL80211_CMD_GET_WIPHY,
+				   nl80211.const.NLM_F_DUMP,
+				   { wiphy: phydev.idx, split_wiphy_dump: true });
+	for (let r in wiphy?.radios) {
+		if (r.index == phydev.radio)
+			return join(",", map(r.freq_ranges ?? [],
+					     range => `${range.start}-${range.end}`));
+	}
 }
 
 function iface_load_config(phy, radio, filename)
@@ -1931,6 +2032,12 @@ function iface_load_config(phy, radio, filename)
 		push(bss.data, line);
 	}
 	f.close();
+
+	if (config.radio.channel in [ "0", "acs_survey" ]) {
+		let ranges = iface_acs_radio_ranges(phy, radio);
+		if (ranges)
+			push(config.radio.data, "acs_radio_ranges=" + ranges);
+	}
 
 	for (let bss in config.bss)
 		if (!bss.bssid)
@@ -2269,6 +2376,17 @@ function dpp_channel_handle_request(channel, req)
 	}
 }
 
+// The links of an AP MLD share one name, one ubus object and one hook. A restart
+// of one link publishes no object event, so nothing registers the hook again.
+function dpp_name_held_elsewhere(phy, name)
+{
+	for (let other, bss_list in hostapd.bss)
+		if (other != phy && bss_list[name])
+			return true;
+
+	return false;
+}
+
 function dpp_channel_handle_disconnect(channel)
 {
 	for (let ifname, hook in hostapd.data.dpp_hooks) {
@@ -2477,13 +2595,32 @@ let main_obj = {
 			let config = iface_load_config(phy, radio, file);
 
 			hostapd.printf(`Set new config for phy ${name}: ${file}`);
-			iface_set_config(name, config);
+			hostapd.data.setup_errors ??= {};
+			delete hostapd.data.setup_errors[name];
+			let accepted = (!file || config) && iface_set_config(name, config) !== false;
+			if (!accepted)
+				hostapd.data.setup_errors[name] = 'AP_CONFIG_REJECTED';
 
 			if (hostapd.data.auth_obj)
 				hostapd.data.auth_obj.notify("reload", { phy, radio });
 
 			return {
-				pid: hostapd.getpid()
+				pid: hostapd.getpid(), accepted: !!accepted
+			};
+		}
+	},
+	config_status: {
+		args: { phy: "", radio: 0 },
+		call: function(req) {
+			if (!req.args.phy)
+				return libubus.STATUS_INVALID_ARGUMENT;
+			let name = phy_name(req.args.phy, req.args.radio);
+			let iface = hostapd.interfaces[name];
+			return {
+				status: hostapd.data.apsta_stopped[name] ? "WAITING_STA" :
+					(hostapd.data.pending_config[name] || hostapd.data.link_reload[name]) ? "STARTING" :
+					iface?.state(),
+				error: hostapd.data.setup_errors?.[name],
 			};
 		}
 	},
@@ -2588,7 +2725,13 @@ let main_obj = {
 			if (removal == null)
 				return libubus.STATUS_NOT_SUPPORTED;
 
-			return removal;
+			if (removal.timed)
+				return mld_link_remove_times(removal);
+
+			// The caller reads the times once, and the driver can apply
+			// a larger count than the request named.
+			mld_link_remove_defer(req, phy, req.args.iface, bss,
+					      removal.removal_ms);
 		}
 	},
 	status: {
@@ -2603,6 +2746,7 @@ let main_obj = {
 				let is_pending = !!hostapd.data.pending_config[phy_name];
 				let iface = hostapd.interfaces[phy_name];
 				let state = iface?.state();
+				let cac = iface?.cac();
 				let is_running = iface && state == "ENABLED" && !is_pending;
 
 				for (let bss in config.bss) {
@@ -2624,6 +2768,7 @@ let main_obj = {
 							running: is_running,
 							pending: is_pending,
 							state,
+							cac,
 						};
 					} else {
 						entry = {
@@ -2632,6 +2777,7 @@ let main_obj = {
 							running: is_running,
 							pending: is_pending,
 							state,
+							cac,
 						};
 						if (config.radio_idx != null && config.radio_idx >= 0)
 							entry.radio = config.radio_idx;
@@ -2672,12 +2818,23 @@ function bss_event(type, name, data) {
 
 	data ??= {};
 	data.name = name;
-	hostapd.data.obj.notify(`bss.${type}`, data, null, null, null, -1);
+	hostapd.data.obj?.notify(`bss.${type}`, data, null, null, null, -1);
 	ubus.call("service", "event", { type: `hostapd.${name}.${type}`, data: {} });
 }
 
 return {
 	shutdown: function() {
+		// ubusd drops a reply to an object that is gone
+		for (let wait in hostapd.data.link_remove_wait)
+			mld_link_remove_reply(wait, wait.bss);
+
+		// Nothing serves the connection from here on, so a caller that
+		// still resolves an object waits for its own timeout.
+		hostapd.data.obj?.remove();
+		hostapd.data.auth_obj?.remove();
+		delete hostapd.data.obj;
+		delete hostapd.data.auth_obj;
+
 		for (let phy in hostapd.data.config)
 			iface_set_config(phy);
 		hostapd.udebug_set(null);
@@ -2698,12 +2855,27 @@ return {
 		bss_event("reload", name, { reconf: reconf != 0 });
 	},
 	bss_remove: function(phy, name, obj) {
-		delete hostapd.data.dpp_hooks[name];
+		mld_link_remove_answer(phy, name, obj);
+		if (!dpp_name_held_elsewhere(phy, name))
+			delete hostapd.data.dpp_hooks[name];
 		bss_event("remove", name);
 	},
+	// The AP MLD keeps its name on its other links, so the event names the
+	// radio of the link that stopped.
 	bss_link_removed: function(phy, name, obj) {
+		mld_link_remove_answer(phy, name, obj);
 		if (!iface_link_reload_expired(phy, name))
 			mld_link_bss_remove(phy, name, obj);
+		bss_event("link_removed", name, { phy });
+	},
+	bss_link_remove_timed: function(phy, name, obj) {
+		iface_link_reload_timed(phy, name, obj);
+		mld_link_remove_answer(phy, name, obj);
+	},
+	cac_start: function(phy, cac) {
+		hostapd.data.obj?.notify("cac_start",
+			{ wiphy: hostapd.data.config[phy]?.phy, ...cac },
+			null, null, null, -1);
 	},
 	sta_auth: function(iface, sta) {
 		let msg = { iface, sta };
