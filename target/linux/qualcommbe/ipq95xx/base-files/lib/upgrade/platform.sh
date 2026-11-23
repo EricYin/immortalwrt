@@ -67,7 +67,8 @@ platform_copy_config() {
 	8devices,kiwi-dvk|\
 	nokia,beacon-10|\
 	arista,c-460|\
-	askey,sbe1v1k)
+	askey,sbe1v1k|\
+	nokia,beacon-10)
 		emmc_copy_config
 		;;
 	esac
