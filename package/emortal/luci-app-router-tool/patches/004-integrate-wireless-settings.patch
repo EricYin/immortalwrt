@@ -1,11 +1,11 @@
 From: ViKing <viking.yfy@qq.com>
-Date: Sun, 22 Nov 2026 20:34:48 +0800
-Subject: [PATCH] luci: protect wireless drafts and consolidate radio status
+Date: Mon, 23 Nov 2026 16:49:00 +0800
+Subject: [PATCH] luci: protect wireless drafts and avoid writing implicit defaults
 
 Track wireless form saves through the existing UCI baseline. Display the
 radio and network status once below the channel. Show current standard,
 region, and transmit power beneath the BSSID after the interface is up.
-Use the Router Tool form option for editing ACS channel restrictions.
+Check ACS syntax in the form and keep an absent cell density implicit.
 
 Signed-off-by: ViKing <viking.yfy@qq.com>
 
@@ -150,7 +150,7 @@ Signed-off-by: ViKing <viking.yfy@qq.com>
  			return network.getWifiNetwork(s.section).then(function(radioNet) {
  				const hwtype = uci.get('wireless', radioNet.getWifiDeviceName(), 'type');
  				const have_mesh = L.hasSystemFeature('hostapd', 'mesh') || L.hasSystemFeature('wpasupplicant', 'mesh');
-@@ -1031,6 +1024,8 @@ return view.extend({
+@@ -1034,11 +1027,14 @@ return view.extend({
  					o = ss.taboption('general', CBIWifiCountryValue, 'country', _('Country Code'));
  					o.wifiNetwork = radioNet;
  
@@ -159,7 +159,13 @@ Signed-off-by: ViKing <viking.yfy@qq.com>
  					o = ss.taboption('advanced', form.ListValue, 'cell_density', _('Coverage cell density'), _('Configures data rates based on the coverage cell density. Normal configures basic rates to 6, 12, 24 Mbps if legacy 802.11b rates are not used else to 5.5, 11 Mbps. High configures basic rates to 12, 24 Mbps if legacy 802.11b rates are not used else to the 11 Mbps rate. Very High configures 24 Mbps as the basic rate. Supported rates lower than the minimum basic rate are not offered.'));
  					o.value('0', _('Disabled'));
  					o.value('1', _('Normal'));
-@@ -2499,6 +2494,7 @@ return view.extend({
+ 					o.value('2', _('High'));
+ 					o.value('3', _('Very High'));
++					o.load = sid => uci.get('wireless', sid, 'cell_density') ?? '0';
+ 
+ 					o = ss.taboption('advanced', form.Value, 'distance', _('Distance Optimization'), _('Distance to farthest network member in meters. Set only for distances above one kilometer; otherwise it is harmful.'));
+ 					o.datatype = 'or(range(0,114750),"auto")';
+@@ -2502,6 +2498,7 @@ return view.extend({
  			if (this.pollFn)
  				poll.remove(this.pollFn);
  			const m2 = new form.Map('wireless');
@@ -167,7 +173,7 @@ Signed-off-by: ViKing <viking.yfy@qq.com>
  			const s2 = m2.section(form.NamedSection, '_new_');
  			const enc = L.isObject(bss.encryption) ? bss.encryption : null;
  			const is_wep = (enc && Array.isArray(enc.wep));
-@@ -2678,6 +2674,10 @@ return view.extend({
+@@ -2681,6 +2678,10 @@ return view.extend({
  						data.push(zones);
  						return data;
  					}, network, zones))
